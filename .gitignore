@@ -1,0 +1,12 @@
+*.fastq.gz
+*.fastq
+*.zip
+*.fq.gz
+*.bam
+*.sam
+*.fasta
+flye_output_*/
+*.err
+*.out
+Analysis/Preprocessing_SLURM/*/BWA_file_creation/
+Analysis/Preprocessing_SLURM/*/Illumina_preprocessing_trimmomatic/
