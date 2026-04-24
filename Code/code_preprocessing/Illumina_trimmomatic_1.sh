@@ -19,7 +19,7 @@ module load Trimmomatic/0.39-Java-17
 R1=/crex/proj/uppmax2026-1-61/Genome_Analysis/2_Zhou_2023/reads/genomics_chr3_data/chr3_illumina_R1.fastq.gz
 R2=/crex/proj/uppmax2026-1-61/Genome_Analysis/2_Zhou_2023/reads/genomics_chr3_data/chr3_illumina_R2.fastq.gz
 
-# Kör Trimmomatic (paired-end)
+# Run Trimmomatic (paired-end)
 trimmomatic PE \
   -threads 1 \
   $R1 $R2 \
