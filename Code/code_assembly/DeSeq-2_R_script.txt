@@ -1,0 +1,258 @@
+# run in R studio
+
+###
+###DeSeq-2
+###
+
+#install deseq2?
+
+#load library
+library(DESeq2)
+library(ggplot2)
+library(pheatmap)
+library(apeglm)
+library(ggrepel)
+
+#input, featureCounts in .txt + make a matrix metadata(control and treated connect sample names to H or c)
+counts_file <- "featureCounts_results.txt"
+
+outdir <- "DESeq2_results"
+
+dir.create(outdir, showWarnings = FALSE)
+
+# read reatureCounts table
+counts <- read.table(
+  counts_file,
+  header = TRUE,
+  sep = "\t",
+  comment.char = "#",
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+#prep count matrix
+# Set gene IDs as rownames
+rownames(counts) <- counts$Geneid
+
+# Remove annotation columns from featureCounts, use only the columns with .bam files/samples
+countdata <- counts[,7:ncol(counts)]
+
+# Clean sample names, replace with simpler names
+colnames(countdata) <- c(
+  "Control_1",
+  "Control_2",
+  "Control_3",
+  "Heat_1",
+  "Heat_2",
+  "Heat_3"
+)
+
+# Convert to matrix
+countdata <- as.matrix(countdata)
+
+#metadatamatrix for connecting samples to the correct class 
+metadata <- data.frame(
+  row.names = colnames(countdata),
+  condition = c(
+    "Control",
+    "Control",
+    "Control",
+    "Heat",
+    "Heat",
+    "Heat"
+  )
+) 
+
+### IS THIS CORRECT, DOES IT MAKE SENSE?
+# Row names MUST match count matrix columns
+rownames(metadata) <- colnames(countdata)
+
+# Convert condition to factor
+metadata$condition <- factor(metadata$condition)
+  
+#build deseq_2 object
+dds <- DESeqDataSetFromMatrix(
+  countData = countdata,
+  colData = metadata,
+  design = ~ condition
+)
+
+#filter low count reads to imporve later plots
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+  
+#run DE analysis, inkl normalization
+dds <- DESeq(dds)
+
+#extract results
+res <- results(dds)
+
+#normalized
+normalized_counts <- counts(
+  dds,
+  normalized = TRUE
+)
+
+write.csv(
+  as.data.frame(normalized_counts),
+  file = paste0(outdir, "/Normalized_counts.csv")
+)
+
+#WHAT DOES THIS DO?
+# Shrink log2 fold changes
+resLFC <- lfcShrink(
+  dds,
+  coef = "condition_Heat_vs_Control",
+  type = "apeglm"
+)
+
+# Order by adjusted p-value
+resOrdered <- resLFC[order(resLFC$padj),]
+
+# Save results table
+write.csv(
+  as.data.frame(resOrdered),
+  file = paste0(outdir, "/DESeq2_results.csv")
+)
+
+
+###
+### Visualize in plots
+###
+
+#look at all plots from presentation and use the ones that seem good
+#plot PCA
+vsd <- vst(dds, blind = FALSE)
+
+pcaData <- plotPCA(vsd, intgroup = "condition", returnData = TRUE)
+
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+pca_plot <- ggplot(pcaData,
+                   aes(PC1, PC2, color = condition)) +
+  geom_point(size = 4) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  theme_bw()
+
+ggsave(
+  filename = paste0(outdir, "/PCA_plot.png"),
+  plot = pca_plot,
+  width = 6,
+  height = 5
+)
+
+#volcano plot
+volcano_data <- as.data.frame(resLFC)
+
+# Remove NA values
+volcano_data <- na.omit(volcano_data)
+
+# Define significant genes
+volcano_data$significant <- ifelse(
+  volcano_data$padj < 0.05 &
+    abs(volcano_data$log2FoldChange) > 1,
+  "yes",
+  "no"
+)
+
+# Add gene names
+volcano_data$gene <- rownames(volcano_data)
+
+# Select genes to label
+label_genes <- volcano_data[
+  volcano_data$padj < 0.001 &
+    abs(volcano_data$log2FoldChange) > 2,
+]
+volcano_plot <- ggplot(
+  volcano_data,
+  aes(
+    x = log2FoldChange,
+    y = -log10(padj),
+    color = significant
+  )
+) +
+  geom_point(alpha = 0.6) +
+  
+  geom_text_repel(
+    data = label_genes,
+    aes(label = gene),
+    size = 3,
+    max.overlaps = 20
+  ) +
+  
+  scale_color_manual(
+    values = c("grey", "red")
+  ) +
+  theme_bw()
+
+ggsave(
+  filename = paste0(outdir, "/Volcano_plot.png"),
+  plot = volcano_plot,
+  width = 8,
+  height = 7
+)
+
+#heatmap
+# Select significant genes
+sig_genes <- rownames(
+  subset(
+    as.data.frame(resLFC),
+    padj < 0.05 &
+      abs(log2FoldChange) > 1
+  )
+)
+
+# Extract normalized transformed matrix
+mat <- assay(vsd)[sig_genes,]
+
+# Row scaling
+mat <- t(scale(t(mat)))
+
+# Column annotation
+annotation_col <- data.frame(
+  condition = metadata$condition
+)
+
+rownames(annotation_col) <- rownames(metadata)
+
+# Heatmap
+png(
+  filename = paste0(outdir, "/Heatmap_significant_genes.png"),
+  width = 1200,
+  height = 1400
+)
+
+pheatmap(
+  mat,
+  annotation_col = annotation_col,
+  show_rownames = FALSE,
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  fontsize_col = 12
+)
+
+dev.off()
+
+#MA plot
+png(
+  filename = paste0(outdir, "/MA_plot.png"),
+  width = 800,
+  height = 600
+)
+
+plotMA(resLFC, ylim = c(-5,5))
+
+dev.off()
+
+#dispersion plot
+png(
+  filename = paste0(outdir, "/Dispersion_plot.png"),
+  width = 800,
+  height = 600
+)
+
+plotDispEsts(dds)
+
+dev.off()
+
